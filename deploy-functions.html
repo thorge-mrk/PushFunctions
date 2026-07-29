@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orately — Edge Functions deployen</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #fff; --line: #e2e1dd; --text: #1c1b19;
+    --muted: #6b6862; --accent: #2f6f4e; --accent-weak: #e8f1ec;
+    --warn: #8a5a00; --warn-weak: #fdf3e0; --err: #a12b23; --err-weak: #fbeceb;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a; --panel: #1e1e23; --line: #34343c; --text: #ececf0;
+      --muted: #9b9aa4; --accent: #6cc196; --accent-weak: #1c3129;
+      --warn: #e0b062; --warn-weak: #33291605; --err: #f08a80; --err-weak: #331f1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 64px; background: var(--bg); color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px; margin-bottom: 16px;
+  }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .07em;
+       color: var(--muted); margin: 0 0 14px; font-weight: 600; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 5px; }
+  label:first-of-type { margin-top: 0; }
+  .hint { font-weight: 400; color: var(--muted); font-size: 12px; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--text); font-size: 14px; font-family: var(--mono);
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  button {
+    padding: 10px 16px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); font-size: 14px; font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .fn { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0;
+        border-top: 1px solid var(--line); }
+  .fn:first-child { border-top: 0; }
+  .fn input { margin-top: 3px; flex: none; }
+  .fn-name { font-family: var(--mono); font-size: 13.5px; }
+  .fn-meta { color: var(--muted); font-size: 12px; }
+  .note { padding: 11px 13px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
+  .note.warn { background: var(--warn-weak); color: var(--warn); border: 1px solid currentColor; }
+  .note.err  { background: var(--err-weak);  color: var(--err);  border: 1px solid currentColor; }
+  .note.ok   { background: var(--accent-weak); color: var(--accent); border: 1px solid currentColor; }
+  #log {
+    font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; max-height: 380px; overflow-y: auto; margin: 0;
+  }
+  #log:empty::before { content: "Noch nichts passiert."; color: var(--muted); }
+  .l-ok   { color: var(--accent); }
+  .l-err  { color: var(--err); font-weight: 600; }
+  .l-warn { color: var(--warn); }
+  .l-dim  { color: var(--muted); }
+  code { font-family: var(--mono); font-size: .92em; background: var(--bg);
+         padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Edge Functions deployen</h1>
+  <p class="sub">Liest die Functions aus GitHub, löst die <code>_shared</code>-Importe selbst auf und lädt sie zu Supabase hoch.</p>
+
+  <div class="note warn">
+    <strong>Deine Tokens bleiben auf diesem Gerät.</strong> Sie werden nirgends gespeichert
+    und nur an <code>api.github.com</code> und <code>api.supabase.com</code> geschickt.
+    Schließt du die Seite, sind sie weg. Trotzdem: Der Supabase-Token hat Vollzugriff auf
+    dein Konto — nach dem Deploy am besten widerrufen.
+  </div>
+
+  <section>
+    <h2>Zugang</h2>
+
+    <label>GitHub-Token
+      <span class="hint">— github.com/settings/tokens, Leserecht auf das Repo genügt</span></label>
+    <input type="password" id="ghToken" placeholder="ghp_… oder github_pat_…" autocomplete="off">
+
+    <label>Supabase-Token
+      <span class="hint">— supabase.com/dashboard/account/tokens</span></label>
+    <input type="password" id="sbToken" placeholder="sbp_…" autocomplete="off">
+
+    <label>Projekt-Ref</label>
+    <input type="text" id="projectRef" value="oddkripmmegliewqhbkl">
+  </section>
+
+  <section>
+    <h2>Quelle</h2>
+    <label>Repository</label>
+    <input type="text" id="repo" value="thorge-mrk/Orately">
+    <label>Branch</label>
+    <input type="text" id="branch" value="claude/flutter-supabase-security-audit-u0msch">
+    <label>Pfad zum functions-Ordner</label>
+    <input type="text" id="basePath" value="Apps/v1.1.0-beta.1/supabase/functions">
+    <div class="row">
+      <button id="btnLoad" class="primary">Functions laden</button>
+    </div>
+  </section>
+
+  <section id="fnSection" hidden>
+    <h2>Was soll raus?</h2>
+    <div id="fnList"></div>
+    <div class="row">
+      <button id="btnAnalyze">Nur prüfen</button>
+      <button id="btnDeploy" class="primary">Ausgewählte deployen</button>
+    </div>
+    <p class="hint" style="margin:12px 0 0">
+      „Nur prüfen“ lädt die Dateien und zeigt, was ins Bundle käme — ohne irgendetwas
+      zu verändern. Immer zuerst das.
+    </p>
+  </section>
+
+  <section>
+    <h2>Protokoll</h2>
+    <pre id="log"></pre>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const logEl = $("log");
+
+function log(msg, cls = "") {
+  const line = document.createElement("div");
+  if (cls) line.className = "l-" + cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const clearLog = () => (logEl.textContent = "");
+const kb = n => (n / 1024).toFixed(1) + " KB";
+
+/* Ein fehlgeschlagener fetch() sieht im Browser immer gleich aus (TypeError),
+   egal ob die API CORS verbietet, das Netz weg ist oder der Host nicht
+   antwortet. Deshalb hier einmal ausführlich erklären statt "Failed to fetch". */
+function explainNetworkError(host) {
+  log("", "");
+  log(`Keine Verbindung zu ${host}.`, "err");
+  log("Mögliche Ursachen:", "dim");
+  log("  1. Der Browser blockiert den Aufruf (CORS). Dann kann diese Seite", "dim");
+  log("     grundsätzlich nicht mit dieser API sprechen — kein Tippfehler,", "dim");
+  log("     sondern eine Entscheidung des Anbieters.", "dim");
+  log("  2. Keine Internetverbindung.", "dim");
+  log("  3. Ein Adblocker oder eine Erweiterung blockt den Aufruf.", "dim");
+  log("", "");
+  log("Bei CORS hilft nur ein anderer Weg — z. B. die Supabase-CLI:", "warn");
+  log("  npx supabase functions deploy --project-ref <ref>", "warn");
+}
+
+/* ---------------------------------------------------------------- GitHub -- */
+
+async function ghRaw(path) {
+  const repo = $("repo").value.trim();
+  const branch = $("branch").value.trim();
+  const url = `https://api.github.com/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${$("ghToken").value.trim()}`,
+        Accept: "application/vnd.github.raw",
+      },
+    });
+  } catch (e) {
+    explainNetworkError("api.github.com");
+    throw new Error("github_unreachable");
+  }
+  if (res.status === 404) throw new Error(`Datei nicht gefunden: ${path}`);
+  if (res.status === 401) throw new Error("GitHub-Token ungültig oder abgelaufen.");
+  if (res.status === 403) throw new Error("GitHub verweigert den Zugriff — hat der Token Leserecht auf das Repo?");
+  if (!res.ok) throw new Error(`GitHub ${res.status} bei ${path}`);
+  return res.text();
+}
+
+async function ghList(dir) {
+  const repo = $("repo").value.trim();
+  const branch = $("branch").value.trim();
+  const url = `https://api.github.com/repos/${repo}/contents/${dir}?ref=${encodeURIComponent(branch)}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${$("ghToken").value.trim()}`,
+        Accept: "application/vnd.github+json",
+      },
+    });
+  } catch (e) {
+    explainNetworkError("api.github.com");
+    throw new Error("github_unreachable");
+  }
+  if (res.status === 401) throw new Error("GitHub-Token ungültig oder abgelaufen.");
+  if (res.status === 404) throw new Error(`Ordner nicht gefunden: ${dir} — stimmen Branch und Pfad?`);
+  if (!res.ok) throw new Error(`GitHub ${res.status} beim Auflisten von ${dir}`);
+  return res.json();
+}
+
+/* --------------------------------------------------- Import-Auflösung ----- */
+
+/* Erfasst `from "…"` (deckt auch `export … from "…"` ab, wichtig seit deck.ts
+   LIMITS aus limits.ts re-exportiert) und Seiteneffekt-Importe `import "…"`. */
+const IMPORT_RE = /(?:from|import)\s+["']([^"']+)["']/g;
+
+function resolveSpec(fromPath, spec) {
+  const parts = fromPath.split("/").slice(0, -1);
+  for (const seg of spec.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") parts.pop();
+    else parts.push(seg);
+  }
+  return parts.join("/");
+}
+
+/* Folgt nur relativen Pfaden. jsr:, npm: und https: löst Deno beim Deploy
+   selbst auf — die dürfen nicht mit ins Bundle. */
+async function collectClosure(entrypoint) {
+  const files = new Map();
+  const queue = [entrypoint];
+  while (queue.length) {
+    const path = queue.shift();
+    if (files.has(path)) continue;
+    const content = await ghRaw(path);
+    files.set(path, content);
+    IMPORT_RE.lastIndex = 0;
+    let m;
+    while ((m = IMPORT_RE.exec(content)) !== null) {
+      const spec = m[1];
+      if (!spec.startsWith("./") && !spec.startsWith("../")) continue;
+      const resolved = resolveSpec(path, spec);
+      if (!files.has(resolved)) queue.push(resolved);
+    }
+  }
+  return files;
+}
+
+/* ------------------------------------------------------- config.toml ------ */
+
+/* Nur so viel TOML wie nötig: [functions.<slug>] gefolgt von verify_jwt.
+   Fehlt ein Eintrag, gilt true — die sichere Richtung. */
+function parseVerifyJwt(toml) {
+  const map = {};
+  let current = null;
+  for (const raw of toml.split("\n")) {
+    const line = raw.trim();
+    const header = line.match(/^\[functions\.([A-Za-z0-9_-]+)\]$/);
+    if (header) { current = header[1]; continue; }
+    if (line.startsWith("[")) { current = null; continue; }
+    const kv = line.match(/^verify_jwt\s*=\s*(true|false)\s*$/);
+    if (kv && current) map[current] = kv[1] === "true";
+  }
+  return map;
+}
+
+/* --------------------------------------------------------- Supabase ------- */
+
+async function sbDeployedFunctions() {
+  const ref = $("projectRef").value.trim();
+  let res;
+  try {
+    res = await fetch(`https://api.supabase.com/v1/projects/${ref}/functions`, {
+      headers: { Authorization: `Bearer ${$("sbToken").value.trim()}` },
+    });
+  } catch (e) {
+    explainNetworkError("api.supabase.com");
+    throw new Error("supabase_unreachable");
+  }
+  if (res.status === 401) throw new Error("Supabase-Token ungültig oder abgelaufen.");
+  if (!res.ok) throw new Error(`Supabase ${res.status} beim Abrufen der Function-Liste`);
+  return res.json();
+}
+
+async function sbDeploy(slug, files, entrypoint, verifyJwt) {
+  const ref = $("projectRef").value.trim();
+  const fd = new FormData();
+  fd.append("metadata", new Blob([JSON.stringify({
+    name: slug,
+    entrypoint_path: entrypoint,
+    verify_jwt: verifyJwt,
+  })], { type: "application/json" }));
+  for (const [path, content] of files) {
+    fd.append("file", new Blob([content], { type: "application/typescript" }), path);
+  }
+  let res;
+  try {
+    res = await fetch(
+      `https://api.supabase.com/v1/projects/${ref}/functions/deploy?slug=${encodeURIComponent(slug)}`,
+      { method: "POST", headers: { Authorization: `Bearer ${$("sbToken").value.trim()}` }, body: fd },
+    );
+  } catch (e) {
+    explainNetworkError("api.supabase.com");
+    throw new Error("supabase_unreachable");
+  }
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  return res.json();
+}
+
+/* ------------------------------------------------------------ Ablauf ------ */
+
+let verifyJwtMap = {};
+
+$("btnLoad").onclick = async () => {
+  clearLog();
+  if (!$("ghToken").value.trim()) return log("Bitte den GitHub-Token eintragen.", "err");
+  if (!$("sbToken").value.trim()) return log("Bitte den Supabase-Token eintragen.", "err");
+  $("btnLoad").disabled = true;
+  try {
+    const base = $("basePath").value.trim().replace(/\/$/, "");
+
+    log("Lese config.toml …", "dim");
+    const tomlPath = base.replace(/\/functions$/, "") + "/config.toml";
+    try {
+      verifyJwtMap = parseVerifyJwt(await ghRaw(tomlPath));
+      log(`config.toml gelesen — ${Object.keys(verifyJwtMap).length} Einträge.`, "ok");
+    } catch (e) {
+      verifyJwtMap = {};
+      log(`config.toml nicht lesbar (${e.message}). verify_jwt = true für alle.`, "warn");
+    }
+
+    log("Liste Functions aus GitHub …", "dim");
+    const entries = await ghList(base);
+    const slugs = entries
+      .filter(e => e.type === "dir" && !e.name.startsWith("_"))
+      .map(e => e.name).sort();
+    log(`${slugs.length} Functions im Repo gefunden.`, "ok");
+
+    log("Frage den aktuellen Stand bei Supabase ab …", "dim");
+    const deployed = await sbDeployedFunctions();
+    const byslug = {};
+    for (const f of (deployed.functions ?? deployed)) byslug[f.slug] = f;
+    log("Verbindung zu Supabase steht.", "ok");
+
+    const list = $("fnList");
+    list.innerHTML = "";
+    for (const slug of slugs) {
+      const live = byslug[slug];
+      const vj = verifyJwtMap[slug] ?? true;
+      const when = live
+        ? new Date(live.updated_at).toLocaleString("de-DE",
+            { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+        : null;
+      const row = document.createElement("label");
+      row.className = "fn";
+      row.innerHTML =
+        `<input type="checkbox" value="${slug}" checked>` +
+        `<span><span class="fn-name">${slug}</span><br>` +
+        `<span class="fn-meta">` +
+        (live ? `live: v${live.version} · ${when}` : `noch nie deployt`) +
+        ` · verify_jwt = ${vj}</span></span>`;
+      list.appendChild(row);
+    }
+    $("fnSection").hidden = false;
+    log("", "");
+    log("Bereit. Jetzt zuerst „Nur prüfen“.", "ok");
+  } catch (e) {
+    if (!String(e.message).endsWith("_unreachable")) log(e.message, "err");
+  } finally {
+    $("btnLoad").disabled = false;
+  }
+};
+
+const selectedSlugs = () =>
+  [...document.querySelectorAll("#fnList input:checked")].map(i => i.value);
+
+async function run(deployForReal) {
+  clearLog();
+  const slugs = selectedSlugs();
+  if (!slugs.length) return log("Nichts ausgewählt.", "warn");
+  if (deployForReal &&
+      !confirm(`${slugs.length} Function(s) werden in der PRODUKTION überschrieben.\n\nWeiter?`)) {
+    return log("Abgebrochen.", "dim");
+  }
+
+  $("btnAnalyze").disabled = $("btnDeploy").disabled = true;
+  const base = $("basePath").value.trim().replace(/\/$/, "");
+  let ok = 0, failed = 0;
+
+  for (const slug of slugs) {
+    log("", "");
+    log(`── ${slug}`, "");
+    try {
+      const entrypoint = `${base}/${slug}/index.ts`;
+      const files = await collectClosure(entrypoint);
+      let total = 0;
+      for (const [p, c] of files) {
+        const size = new Blob([c]).size;
+        total += size;
+        log(`   ${p.replace(base + "/", "")}  ${kb(size)}`, "dim");
+      }
+      log(`   ${files.size} Dateien, ${kb(total)} gesamt`, "");
+
+      if (!deployForReal) { ok++; continue; }
+
+      /* Die Pfade im Bundle müssen relativ zueinander stimmen, sonst findet
+         Deno "../_shared/…" nicht. base wird deshalb abgeschnitten, die
+         Ordnerstruktur darunter bleibt erhalten. */
+      const rel = new Map();
+      for (const [p, c] of files) rel.set(p.slice(base.length + 1), c);
+      const relEntry = entrypoint.slice(base.length + 1);
+      const vj = verifyJwtMap[slug] ?? true;
+
+      log(`   Lade hoch (verify_jwt = ${vj}) …`, "dim");
+      const res = await sbDeploy(slug, rel, relEntry, vj);
+      log(`   ✓ deployt als Version ${res.version}`, "ok");
+      ok++;
+    } catch (e) {
+      failed++;
+      log(`   ✗ ${e.message}`, "err");
+      if (String(e.message).endsWith("_unreachable")) break;
+    }
+  }
+
+  log("", "");
+  log(deployForReal
+    ? `Fertig: ${ok} deployt, ${failed} fehlgeschlagen.`
+    : `Prüfung fertig: ${ok} in Ordnung, ${failed} mit Problemen.`,
+    failed ? "warn" : "ok");
+  if (deployForReal && ok) log("Kontrolle: Supabase → Edge Functions → Logs.", "dim");
+
+  $("btnAnalyze").disabled = $("btnDeploy").disabled = false;
+}
+
+$("btnAnalyze").onclick = () => run(false);
+$("btnDeploy").onclick  = () => run(true);
+</script>
+</body>
+</html>
